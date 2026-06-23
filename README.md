@@ -1,1 +1,1 @@
-# MedCAGD: Context-Aware Gated Decoder for Effecient Medical Image Segmentation - Accepted in ECCV 2026
+# MedCAGD: Context-Aware Gated Decoder for Efficient Medical Image Segmentation - Accepted in ECCV 2026

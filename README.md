@@ -24,6 +24,8 @@ Please Cite it as following
 
 ![medcagd-poster](./medcagd-poster.jpg)
 
+# Download Dataset from Huggingface. Link: [https://huggingface.co/datasets/saadwazir/MedCAGD-Dataset-Collection](https://huggingface.co/datasets/saadwazir/MedCAGD-Dataset-Collection)
+
 # Benchmark Results
 
 <table>

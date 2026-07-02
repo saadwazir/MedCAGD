@@ -4,4 +4,22 @@
 > 📦 Public release coming soon.
 > 🙏 Please wait for the official release. Thank you for your patience!
 > 
+
+Download Paper:
+[https://arxiv.org/abs/2607.00409](https://arxiv.org/abs/2607.00409)
+
+Please Cite it as following
+
+```
+@inproceedings{wazir2026medcagdcontextawaregateddecoder,
+      title={MedCAGD: Context-Aware Gated Decoder for Efficient Medical Image Segmentation}, 
+      author={Saad Wazir and Patrick Dominique Vibild and Dinh Phu Tran and Seongah Kim and Daeyoung Kim},
+      year={2026},
+      eprint={2607.00409},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2607.00409}, 
+}
+```
+
 ![medcagd-poster](./medcagd-poster.jpg)

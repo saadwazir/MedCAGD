@@ -13,7 +13,7 @@ Please Cite it as following
 ```
 @inproceedings{wazir2026medcagdcontextawaregateddecoder,
       title={MedCAGD: Context-Aware Gated Decoder for Efficient Medical Image Segmentation}, 
-      author={Saad Wazir and Patrick Dominique Vibild and Dinh Phu Tran and Seongah Kim and Daeyoung Kim},
+      author={Saad Wazir, Patrick Dominique Vibild, Dinh Phu Tran, Seongah Kim, Daeyoung Kim},
       year={2026},
       eprint={2607.00409},
       archivePrefix={arXiv},

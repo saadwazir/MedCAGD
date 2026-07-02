@@ -24,9 +24,10 @@ Please Cite it as following
 
 ![medcagd-poster](./medcagd-poster.jpg)
 
-# Download Dataset from Huggingface. Link: [https://huggingface.co/datasets/saadwazir/MedCAGD-Dataset-Collection](https://huggingface.co/datasets/saadwazir/MedCAGD-Dataset-Collection)
+## Download Dataset from Huggingface.
+Link: [https://huggingface.co/datasets/saadwazir/MedCAGD-Dataset-Collection](https://huggingface.co/datasets/saadwazir/MedCAGD-Dataset-Collection)
 
-# Benchmark Results
+## Benchmark Results
 
 <table>
 <caption>Table: 1 - Comprehensive performance comparison across 9 medical image segmentation benchmarks. Average Dice scores are reported.</caption>

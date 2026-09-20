@@ -1,0 +1,13 @@
+albumb_aug,complex_aug,image_only_aug,cutmix_augmnet,include_original_train,use_amp
+True,False,False,False,False,False
+True,True,False,False,False,False
+True,True,True,False,False,False
+True,True,True,True,False,False
+True,True,True,True,True,False
+True,True,True,False,True,False
+True,True,False,False,True,False
+True,False,False,False,True,False
+True,False,False,False,False,False
+True,False,False,False,False,True
+True,False,False,False,True,True
+True,False,False,False,False,False

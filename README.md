@@ -321,7 +321,7 @@ Defaults below describe the checked-in source. Edit the file before launching a 
 | `edge_loss_name` | `"EdgeBCELoss"` | Edge loss: `EdgeBCELoss`, `EdgeDiceLoss`, or `EdgeBCEDiceLoss`. |
 | `H`, `W` | `256`, `256` | Input height and width used by the dataset and model setup. |
 | `size` | `(H, W)` | Derived resize/crop dimensions. |
-| `encoder_name_str` | `"pvt_v2_b2"` | Pretrained `timm` feature encoder. Alternative encoders must work with the model's four-feature decoder interface; arbitrary names are not guaranteed to work. |
+| `encoder_name_str` | `"pvt_v2_b2"` | Pretrained `timm` feature encoder. For the complete list of compatible timm encoders, see [timm_master_encoder_validation.csv](timm_master_encoder_validation.csv). Alternative encoders must work with the model's four-feature decoder interface; arbitrary names are not guaranteed to work. |
 
 ### Choose or create loss functions
 

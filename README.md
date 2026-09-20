@@ -22,6 +22,413 @@ Please Cite it as following
 ## Download Dataset from Huggingface.
 Link: [https://huggingface.co/datasets/saadwazir/MedCAGD-Dataset-Collection](https://huggingface.co/datasets/saadwazir/MedCAGD-Dataset-Collection)
 
+
+
+
+# Medical Image Segmentation
+
+PyTorch image segmentation code (configured for DRIVE retinal vessel patches). The model uses a pretrained `timm` encoder (`pvt_v2_b2` by default), a custom decoder, three auxiliary segmentation outputs, and three edge outputs. It supports binary and multiclass segmentation.
+
+## Environment and dependencies
+
+Run all commands from the repository root, where `cfgs.py` is located. The examples use Linux/bash. Create and activate an environment first:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+```
+
+Install the packages for training and the `xrun.py` experiment workflow:
+
+```bash
+# Training framework and vision support
+python -m pip install torch torchvision
+
+# Encoder, losses, augmentation, image processing, arrays, CSV handling, and progress bars
+python -m pip install timm segmentation-models-pytorch albumentations opencv-python numpy pandas tqdm
+
+# GPU metrics: this example targets a CUDA 12.x environment
+python -m pip install cupy-cuda12x
+```
+
+Use a CUDA-enabled PyTorch installation compatible with your NVIDIA driver, and choose the CuPy distribution matching your CUDA environment. Evaluation requires CUDA: `eval_metrics.py` uses CuPy, and evaluation scripts use CUDA timing events even though they contain a CPU device fallback.
+
+Install these additional packages for the optional utilities:
+
+```bash
+# CPU metrics for precomputed masks (test_eval_manual.py)
+python -m pip install scipy
+
+# Parameter, operation, and FLOP profiling (profile_model.py)
+python -m pip install thop fvcore
+
+# Image I/O, patch extraction, and reconstruction (patch.py, unpatch.py)
+python -m pip install Pillow patchify
+```
+
+Model construction uses `pretrained=True`, so the first run needs access to download encoder weights unless they are already cached.
+
+Check GPU access before starting the experiment:
+
+```bash
+python -c "import torch, cupy; print('PyTorch CUDA:', torch.cuda.is_available()); print('CuPy GPUs:', cupy.cuda.runtime.getDeviceCount())"
+```
+
+## Quick start: run an experiment with `xrun.py`
+
+1. Prepare paired images and masks under `train/images`, `train/masks`, `val/images`, `val/masks`, `test/images`, and `test/masks` inside your dataset root. See [dataset preparation](#prepare-the-dataset) for details.
+2. Edit [cfgs.py](cfgs.py) for a new experiment:
+
+   ```python
+   main_dataset_dir = "/absolute/path/to/dataset/"  # Keep the trailing slash
+   gpu_list = "0"
+
+   fresh_training = 1  # Change from the current default of 0
+   resume_train = 0
+   resumed_chkpt = ""
+
+   batch_size = 24
+   num_epochs = 8
+   tries = 16
+   val_eval_threshold = 4
+   random_train = 1
+   random_seed = 1
+   seed_val = 55
+   ```
+
+   The current split settings already use `train/`, `val/`, and `test/`. Reduce `batch_size` if GPU memory is insufficient.
+3. Start the experiment:
+
+   ```bash
+   python xrun.py
+   ```
+
+**A fresh experiment deletes the existing `output/` directory.** Preserve any results you need before running with `fresh_training = 1`.
+
+The runner performs up to 16 iterations of 8 training epochs each, stops after 4 consecutive validation checks without improvement, and tests the best validation checkpoint. Results are written to `output/summary.csv`, with detailed metrics under `output/val_eval_results/` and `output/test_eval_results/`.
+
+## How `xrun.py` works
+
+`xrun.py` is the experiment entry point. It launches each stage sequentially with the active Python environment, waits for it to finish, and stops with an error if a stage fails. The runner finishes after final testing and summary writing.
+
+Select GPUs with `gpu_list` in `cfgs.py`, for example `"0"` or `"0,1"`. The current `xrun.py` still accepts `-g`/`--gpu`, but the parsed value is unused; it does not select a GPU or launch a follow-up job. Use `python xrun.py` with GPU selection configured in `cfgs.py`.
+
+Each iteration runs these stages:
+
+1. `train.py` trains for `num_epochs` additional epochs and saves a checkpoint after each epoch.
+2. `val_eval.py` evaluates checkpoints on the validation split.
+3. `check_val.py` selects the global best checkpoint by validation Dice. The runner preserves newly selected best weights with a `_best_iteration_<n>_lock.pth` filename and updates best-checkpoint CSVs.
+4. `stopearly.py` checks whether the best score has improved. `val_eval_threshold` controls patience in iterations, not epochs.
+5. The runner prunes checkpoints not retained in best-checkpoint history. If training continues, the next iteration resumes from the global best checkpoint.
+
+After the loop, `test_eval.py` evaluates the best checkpoint on the test split and the runner writes the experiment summary. Because each iteration resumes from the best checkpoint, its starting epoch may precede the end of the previous iteration.
+
+With `random_train = 1`, iteration 1 uses the baseline configuration, then subsequent iterations cycle through rows in `train_random_comb.csv`. Despite its name, configuration selection is sequential, not random. The CSV controls `albumb_aug`, `complex_aug`, `image_only_aug`, `cutmix_augmnet`, `include_original_train`, and `use_amp`. Set `random_train = 0` to keep these settings fixed.
+
+With `random_seed = 1`, iteration seeds are `seed_val + iteration`: the current base seed of `55` gives `56` for the first iteration. Set `random_seed = 0` to keep the base seed across iterations.
+
+The runner saves the initial augmentation/AMP settings in `output/baseline_cfg.csv` and rewrites `cfgs.py` as it operates, including setting `fresh_training = 1` at completion. Check its settings before launching another experiment.
+
+### Resume an experiment
+
+Keep the existing experiment outputs and set:
+
+```python
+fresh_training = 0
+resume_train = 1
+resumed_chkpt = "output/checkpoints/your-checkpoint.pth"
+```
+
+Then run `python xrun.py` again. The first iteration resumes from the specified checkpoint; subsequent iterations use the global best validation checkpoint. Configuration cycling is skipped in this resume mode. `tries` limits iterations in this new invocation.
+
+The current defaults `fresh_training = 0` and `resume_train = 0` are rejected by `xrun.py`. Choose either the fresh-experiment settings above or a valid resume configuration before launching it.
+
+## Prepare the dataset
+
+Provide paired image and mask files in this layout:
+
+```text
+dataset/
+├── train/
+│   ├── images/
+│   └── masks/
+├── val/                 # Separate validation split
+│   ├── images/
+│   └── masks/
+└── test/
+    ├── images/
+    └── masks/
+```
+
+Edit these values in [cfgs.py](cfgs.py):
+
+```python
+main_dataset_dir = "/absolute/path/to/dataset/"
+train_images_dir = "train/images/*"
+train_masks_dir = "train/masks/*"
+val_images_dir = "val/images/*"
+val_masks_dir = "val/masks/*"
+test_images_dir = "test/images/*"
+test_masks_dir = "test/masks/*"
+```
+
+- Keep the trailing `/` on `main_dataset_dir`: the code concatenates it directly with each split pattern.
+- Images and masks are independently sorted and paired by index. Their counts and sorted ordering must match; use corresponding filenames and keep non-image files out of the matching paths.
+- Images are read with OpenCV in BGR order, scaled to `[0, 1]`, and resized to `(H, W)`. Masks use nearest-neighbor resizing.
+- Binary masks use `0` for background and any positive value for foreground. Multiclass masks must contain integer class IDs from `0` through `num_Classes - 1`.
+- With complex augmentation enabled, source images must be large enough for the `(H, W)` random crop, which runs before resizing. Square patches match the default augmentation setup.
+
+
+
+
+## Run training and evaluation
+
+### Basic workflow
+
+Set the dataset paths and GPU in `cfgs.py`. For a new standalone training run:
+
+```python
+gpu_list = "0"
+resume_train = 0
+resumed_chkpt = ""
+batch_size = 24
+num_epochs = 8
+```
+
+Run training, then test evaluation:
+
+```bash
+python train.py
+python test_eval.py
+```
+
+Training uses AdamW with weight decay `1e-4`, saves a timestamped `.pth` checkpoint after every epoch, and appends training losses to CSV. `train.py` does not automatically evaluate validation data. Test evaluation scans `checkpoint_dir` and skips checkpoints already listed in its `eval_status.csv`.
+
+For validation and best-checkpoint selection:
+
+```bash
+python val_eval.py
+python check_val.py
+```
+
+Evaluate one specific checkpoint:
+
+```bash
+EVAL_ONLY_CKPT="output/checkpoints/your-checkpoint.pth" python test_eval.py
+```
+
+The evaluation-status check still applies when selecting one checkpoint. To evaluate again without reusing old status and metrics, set `eval_root_test` to a new directory in `cfgs.py`.
+
+### Save prediction images
+
+The standard `test_eval.py` reports metrics but does not save prediction PNGs. Use:
+
+```bash
+EVAL_ONLY_CKPT="output/checkpoints/your-checkpoint.pth" python test_eval_full.py
+```
+
+This script exports segmentation masks, edge maps when enabled, and per-image metric CSVs. It resets the prediction folders and evaluation-status file at the start of each run. Use a separate `eval_root_test` if you need to preserve earlier exports.
+
+### Resume training
+
+```python
+fresh_training = 0
+resume_train = 1
+resumed_chkpt = "output/checkpoints/your-checkpoint.pth"
+num_epochs = 8
+```
+
+```bash
+python train.py
+```
+
+`num_epochs` is the number of **additional** epochs. For example, resuming an epoch-8 checkpoint with `num_epochs = 8` trains epochs 9–16. Model and optimizer state are restored; scheduler and AMP scaler state are not stored in checkpoints. Keep the model configuration compatible with the saved weights.
+
+`RESUME_CKPT_OVERRIDE` takes precedence over the resume settings and can be used directly:
+
+```bash
+RESUME_CKPT_OVERRIDE="output/checkpoints/your-checkpoint.pth" python train.py
+```
+
+
+### Create patches with `patch.py`
+
+[patch.py](patch.py) extracts paired PNG patches from one dataset split at a time. Its `INPUT_MAIN_DIR` must contain `images/` and `masks/`, with an identically named mask (including extension) for each image. Edit the configuration at the top of the script before running:
+
+```python
+INPUT_MAIN_DIR = "/absolute/path/to/full-dataset/train"
+OUTPUT_MAIN_DIR = "/absolute/path/to/patch-dataset/train"
+PATCH_SIZE = 256
+STRIDE = 64
+RESIZE = 1
+RESIZE_H = 1024
+RESIZE_W = 1024
+```
+
+```bash
+python patch.py
+```
+
+Repeat with the corresponding input/output paths for `val` and `test`, then set `main_dataset_dir` in `cfgs.py` to the patch dataset root. The script's current paths target the DRIVE test split; it does not process all splits automatically.
+
+With these settings, each image and mask produces 169 patches named `<original-stem>-patch-0001.png` through `<original-stem>-patch-0169.png`, ordered row by row. Outputs go into `images/` and `masks/`, with `patch_details.csv`, `summary.csv`, and `total.csv` at the output split root. Images use bilinear resizing and masks use nearest-neighbor resizing. Set `RESIZE = 0` to retain the original dimensions; each dimension must be at least `PATCH_SIZE`, and `(dimension - PATCH_SIZE)` must be divisible by `STRIDE`.
+
+**`patch.py` clears the entire configured `OUTPUT_MAIN_DIR` before processing.** Use a separate output directory from the source dataset.
+
+### Reconstruct full images with `unpatch.py`
+
+[unpatch.py](unpatch.py) reconstructs one directory of image or mask patches per run. Set `INPUT_MAIN_DIR` to the directory containing the patch files directly, such as `test/images`, `test/masks`, or one checkpoint's prediction folder exported by `test_eval_full.py`. Set `OUTPUT_MAIN_DIR` to a separate reconstruction directory, then run:
+
+```bash
+python unpatch.py
+```
+
+Match `PATCH_SIZE` and `STRIDE` to extraction, and set `PATCHED_H` and `PATCHED_W` to the canvas dimensions used when creating the patches. Both scripts currently use 256-pixel patches, stride 64, and a 1024 × 1024 canvas. The dataset path in `cfgs.py` currently names a stride-128 dataset, so update the dataset path or script settings to match your actual data.
+
+Reconstruction requires every patch index from 1 through the expected grid size for each original filename prefix. It saves `<original-stem>.png` plus `patch_details.csv`, `summary.csv`, and `total.csv`. By default, `RESIZE = 1` resizes the reconstructed canvas to `RESIZE_H = 584` and `RESIZE_W = 565`; change these for your dataset or set `RESIZE = 0` to keep the canvas dimensions. Single-channel patches are treated as masks and use nearest-neighbor resizing; color images use bilinear resizing.
+
+**`unpatch.py` clears the configured `OUTPUT_MAIN_DIR` before reconstruction.**
+
+
+## Configuration reference: `cfgs.py`
+
+Defaults below describe the checked-in source. Edit the file before launching a process; most scripts import its values at startup.
+
+### Device, seeds, and run control
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `gpu_list` | `"0"` | Visible GPU IDs, e.g. `"0,1"`. Training uses `torch.nn.DataParallel` when multiple GPUs are visible. |
+| `random_train` | `1` | Enables configuration cycling in `xrun.py`; has no effect on standalone training. |
+| `random_seed` | `1` | In `xrun.py`, uses `seed_val + iteration` when enabled; `0` keeps the base seed. |
+| `seed_val` | `55` | Base Python, NumPy, and PyTorch seed. `XRUN_SEED` overrides the main seed; data-loader workers still use `seed_val + worker_id`. |
+| `fresh_training` | `0` | In `train.py`, enables dataset samples/statistics when `1`; it does not clear outputs. In `xrun.py`, `1` starts a fresh experiment and deletes `output/`. |
+| `resume_train` | `0` | Enables loading `resumed_chkpt` in standalone training. |
+| `resumed_chkpt` | `""` | Checkpoint path for resuming model and optimizer state. |
+| `tries` | `16` | Maximum `xrun.py` iterations, subject to early stopping. |
+| `val_eval_threshold` | `4` | Number of consecutive checks without a strictly better validation Dice score before early stopping. This is not a prediction threshold. |
+
+### Training and model
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `batch_size` | `24` | Training and standard evaluation batch size. Reduce if GPU memory is insufficient. |
+| `num_epochs` | `8` | Epochs per training invocation, including each `xrun.py` iteration. |
+| `use_amp` | `False` | Enables CUDA automatic mixed precision and gradient scaling during training. |
+| `num_Classes` | `2` | Values up to `2` use one binary output channel; values above `2` use one output channel per class. |
+| `loss_name` | `"BCEWithLogitsLoss"` | Automatically set to `"MulticlassBCEWithLogitsLoss"` when `num_Classes > 2`. Other selectors are defined in `loss.py`. |
+| `edge_loss_name` | `"EdgeBCELoss"` | Edge loss: `EdgeBCELoss`, `EdgeDiceLoss`, or `EdgeBCEDiceLoss`. |
+| `H`, `W` | `256`, `256` | Input height and width used by the dataset and model setup. |
+| `size` | `(H, W)` | Derived resize/crop dimensions. |
+| `encoder_name_str` | `"pvt_v2_b2"` | Pretrained `timm` feature encoder. Alternative encoders must work with the model's four-feature decoder interface; arbitrary names are not guaranteed to work. |
+
+### Choose or create loss functions
+
+You can choose different segmentation and edge loss functions by setting their exact, case-sensitive name strings in [cfgs.py](cfgs.py): use `loss_name` for segmentation and `edge_loss_name` for edge supervision. Check `get_loss_fn()` and `get_edge_loss_fn()` in [loss.py](loss.py) for the available choices and their implementations.
+
+| Setting / task | Available name strings |
+| --- | --- |
+| `loss_name` — binary segmentation | `BCEWithLogitsLoss`, `DiceLoss`, `DiceBCELoss`, `LovaszWrapper`, `MCCWrapper`, `dece_bce`, `mL1ACE_bce`, `BinaryFocalLoss`, `BinaryFocalTverskyLoss`, `BinaryAsymmetricFocalLoss` |
+| `loss_name` — multiclass segmentation | `MulticlassBCEWithLogitsLoss`, `MulticlassBCEDiceLoss`, `MulticlassFocalLoss`, `MulticlassFocalTverskyLoss`, `MulticlassAsymmetricFocalLoss` |
+| `edge_loss_name` | `EdgeBCELoss`, `EdgeDiceLoss`, `EdgeBCEDiceLoss` |
+
+For example, for binary segmentation:
+
+```python
+loss_name = "DiceBCELoss"
+edge_loss_name = "EdgeBCEDiceLoss"
+```
+
+In `cfgs.py`, edit `loss_name` inside the appropriate `num_Classes` branch, or place your assignment after that conditional so the default does not overwrite it. Choose a segmentation loss compatible with your binary or multiclass task. Edge loss contributes to training when `edge_supervision = True`.
+
+You can also create your own loss in `loss.py`. Implement a PyTorch `nn.Module` whose `forward` accepts the model predictions and targets and returns a scalar loss, then add its name and constructor to `get_loss_fn()` or `get_edge_loss_fn()`. Set the matching name string in `cfgs.py`; defining a class alone does not register it with the selectors. Follow the existing implementations for the expected prediction and target shapes.
+
+### Augmentation
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `train_augmentation_online` | `True` | Master switch for training-time Albumentations and CutMix. |
+| `albumb_aug` | `True` | Enables joint geometric transforms; also gates image-only transforms. |
+| `complex_aug` | `True` | Adds transpose, random 90° rotation, and random crop to rotation and horizontal/vertical flips. |
+| `image_only_aug` | `True` | Adds brightness/contrast, gamma, multiplicative noise, and Gaussian blur to images only. |
+| `cutmix_augmnet` | `True` | Applies paired image/mask CutMix with probability `0.6` on eligible samples, independently of `albumb_aug`. Keep this exact spelling. |
+| `include_original_train` | `True` | Doubles dataset length: first half is original samples, second half is eligible for augmentation. If augmentation is disabled, both halves contain originals. |
+
+### Deep and edge supervision
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `deep_supervision` | `True` | Includes the three auxiliary segmentation losses during training. |
+| `deep_supervision_weights` | `[1.0, 0.4, 0.3, 0.2]` | Weights for the main prediction followed by the three auxiliary predictions. Must contain four values. |
+| `normalize_deep_weights` | `True` | Divides segmentation weights by their sum during training. |
+| `edge_supervision` | `True` | Adds edge loss to segmentation loss during training. |
+| `edge_weights` | `[1.0, 1.0, 1.0]` | Weights for the three edge predictions. Must contain three values. |
+| `normalize_edge_weights` | `True` | Divides edge weights by their sum during training. |
+
+Weight sums must be nonzero when normalization is enabled. Total training loss is segmentation loss plus edge loss when enabled. Evaluation uses the main segmentation output; its edge-loss reporting uses raw `edge_weights`, so it is not directly comparable to normalized training edge loss.
+
+### Dataset paths
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `main_dataset_dir` | `"../0-datasets/eye-datasets/DRIVE-2004-patches-256-128/"` | Dataset root, relative to the working directory or absolute. |
+| `train_images_dir` | `"train/images/*"` | Training image pattern relative to the root. |
+| `train_masks_dir` | `"train/masks/*"` | Training mask pattern. |
+| `val_images_dir` | `"val/images/*"` | Validation image pattern. |
+| `val_masks_dir` | `"val/masks/*"` | Validation mask pattern. |
+| `test_images_dir` | `"test/images/*"` | Test image pattern. |
+| `test_masks_dir` | `"test/masks/*"` | Test mask pattern. |
+
+### Learning rate
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `lr` | `1e-4` | Initial AdamW learning rate. |
+| `use_lr_schedule` | `1` | Enables `CosineAnnealingWarmRestarts`, stepped after each epoch. |
+| `eta_min` | `1e-6` | Minimum scheduled learning rate. |
+| `cosine_T0` | `5` | Initial restart period, calculated by `get_cosine_T0(num_epochs)`. |
+| `cosine_T_mult` | `1` | Multiplier applied to the restart period after each restart. |
+
+The actual `get_cosine_T0()` implementation returns `2` for `num_epochs <= 1`, `3` for `2–5`, and `5` for anything above `5`. Its existing docstring describes different values; the implementation determines behavior.
+
+### Output paths
+
+| Setting | Default | Contents |
+| --- | --- | --- |
+| `checkpoint_dir` | `"output/checkpoints/"` | Model/optimizer checkpoints. |
+| `sanity_check_logs` | `"output/sanity-check/logs/"` | Dataset and model statistics when `fresh_training = 1`. |
+| `train_samples` | `"output/sanity-check/training-samples"` | Sample images and masks when `fresh_training = 1`. |
+| `train_logs` | `"output/train-logs/"` | Training log directory. |
+| `train_log_loss_file` | `"output/train-logs/train-loss.csv"` | Checkpoint name, epoch, loss, and elapsed time. |
+| `eval_root_val` | `"output/val_eval_results"` | Validation metrics, best-checkpoint CSVs, and early-stop state. |
+| `eval_root_test` | `"output/test_eval_results"` | Test metrics and optional prediction exports. |
+
+Evaluation summaries are written under `<eval_root>/pred-csv/summary_metrics.csv` with Dice, precision, recall, HD95, and IoU. Binary prediction threshold is fixed at `0.5` in evaluation calls. Stage logs are written to `output/run_log.csv`; `xrun.py` also writes `output/summary.csv`. Some utilities hard-code `output/`, so changing configurable paths does not relocate every artifact.
+
+## Standalone Python scripts
+
+Run these scripts from the repository root with the environment activated. Configure dataset paths and training settings in `cfgs.py`; script-specific settings and required inputs are noted below.
+
+| Script | Command | Purpose and required inputs |
+| --- | --- | --- |
+| `xrun.py` | `python xrun.py` | Runs the complete experiment: training, validation, best-checkpoint selection, early stopping, and final testing. Requires a fresh or resume configuration as described above. |
+| `train.py` | `python train.py` | Trains or resumes the segmentation model using `cfgs.py`, saving a checkpoint after each epoch and appending loss logs. Requires paired training images and masks. |
+| `test_eval.py` | `python test_eval.py` | Evaluates checkpoints on the test split and writes summary metrics. Requires test images/masks, checkpoints, and CUDA. Supports `EVAL_ONLY_CKPT` to select one checkpoint. |
+| `test_eval_full.py` | `python test_eval_full.py` | Evaluates test data and exports prediction masks, optional edge maps, and per-image metrics. Supports `EVAL_ONLY_CKPT`; resets prediction folders and evaluation status on each run. Requires CUDA. |
+| `test_eval_manual.py` | `python test_eval_manual.py` | Computes metrics from existing prediction masks and matching ground-truth masks without model inference. Edit its own input paths, output CSV paths, and `NUM_CLASSES`; ensure output parent directories exist. |
+| `profile_model.py` | `python profile_model.py` | Measures parameters, MACs, FLOPs, inference latency, and throughput using synthetic inputs; saves results to `flops.txt`. Requires CUDA and profiling dependencies. Edit its own precision, batch-size, GPU, and benchmark overrides if needed. |
+| `patch.py` | `python patch.py` | Extracts paired image/mask patches from one split and writes patch CSVs. Edit its input/output roots, patch size, stride, and optional resize settings; see [patch creation](#create-patches-with-patchpy). Clears the configured output directory before extraction. |
+| `unpatch.py` | `python unpatch.py` | Reconstructs full images/masks from named patches and writes reconstruction CSVs. Edit its input/output paths, patch size, stride, grid dimensions, and resize settings. Point the input at a directory containing patch files directly, such as one checkpoint's prediction folder. Clears the configured output directory before reconstruction. |
+
+### Practical note
+
+For tiny datasets with `fresh_training = 1`, keep `batch_size` no larger than the effective training dataset length: sample export uses `random.sample(..., batch_size)`.
+
+
+
+
+
 ## Benchmark Results
 
 <table>

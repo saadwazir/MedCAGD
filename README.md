@@ -31,26 +31,49 @@ PyTorch image segmentation code (configured for DRIVE retinal vessel patches). T
 
 ## Environment and dependencies
 
-Run all commands from the repository root, where `cfgs.py` is located. The examples use Linux/bash. Create and activate an environment first:
+Run all commands from the repository root, where `cfgs.py` is located. The examples use Linux/bash with Conda, **Python 3.13.3**, and **PyTorch 2.7.0 with CUDA 12.8**. GPU execution requires a compatible NVIDIA GPU and driver.
+
+Create and activate the environment:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
+conda create -n pytorch27 -c conda-forge python=3.13.3 pip=25.1 -y
+conda activate pytorch27
 ```
 
 Install the packages for training and the `xrun.py` experiment workflow:
 
 ```bash
-# Training framework and vision support
-python -m pip install torch torchvision
+# Training framework and vision support (CUDA 12.8)
+python -m pip install torch==2.7.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+python -m pip install torchvision==0.22.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+python -m pip install torchaudio==2.7.0+cu128 --index-url https://download.pytorch.org/whl/cu128
 
-# Encoder, losses, augmentation, image processing, arrays, CSV handling, and progress bars
-python -m pip install timm segmentation-models-pytorch albumentations opencv-python numpy pandas tqdm
+# Arrays, CSV handling, scientific computing, and progress bars
+python -m pip install numpy==2.1.2
+python -m pip install pandas==2.2.3
+python -m pip install scipy==1.15.2
+python -m pip install pillow==11.0.0
+python -m pip install tqdm==4.67.1
 
-# GPU metrics: this example targets a CUDA 12.x environment
-python -m pip install cupy-cuda12x
+# Image processing and augmentation
+python -m pip install opencv-python-headless==4.11.0.86
+python -m pip install albucore==0.0.24
+python -m pip install albumentations==2.0.6
+
+# Encoder, segmentation models, and losses
+python -m pip install timm==1.0.15
+python -m pip install segmentation-models-pytorch==0.5.0
+
+# GPU metrics (CUDA 12.x)
+python -m pip install cupy-cuda12x==13.4.1
+
+# Check dependency consistency
+python -m pip check
 ```
+
+This setup uses `opencv-python-headless`, which provides `cv2` without GUI functions such as `cv2.imshow`. Avoid installing `opencv-python` alongside it.
+
+For the full environment details and additional package versions, see [`pytorch27.yml`](./pytorch27.yml) in the repository root. The commands above pin the selected packages but do not reproduce every dependency recorded in that file.
 
 Use a CUDA-enabled PyTorch installation compatible with your NVIDIA driver, and choose the CuPy distribution matching your CUDA environment. Evaluation requires CUDA: `eval_metrics.py` uses CuPy, and evaluation scripts use CUDA timing events even though they contain a CPU device fallback.
 

@@ -71,8 +71,6 @@ python -m pip install cupy-cuda12x==13.4.1
 python -m pip check
 ```
 
-This setup uses `opencv-python-headless`, which provides `cv2` without GUI functions such as `cv2.imshow`. Avoid installing `opencv-python` alongside it.
-
 For the full environment details and additional package versions, see [`pytorch27.yml`](./pytorch27.yml) in the repository root. The commands above pin the selected packages but do not reproduce every dependency recorded in that file.
 
 Use a CUDA-enabled PyTorch installation compatible with your NVIDIA driver, and choose the CuPy distribution matching your CUDA environment. Evaluation requires CUDA: `eval_metrics.py` uses CuPy, and evaluation scripts use CUDA timing events even though they contain a CPU device fallback.
